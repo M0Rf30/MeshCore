@@ -30,6 +30,20 @@ public:
     }
   }
 
-  void resetHMAC(const uint8_t* key, size_t keyLen) {}
-  void finalizeHMAC(const uint8_t* key, size_t keyLen, uint8_t* hash, size_t hashLen) {}
+  // Deterministic but not cryptographic: folds 'key' into the running state
+  // before/after the message bytes. Both encryptThenMAC() and MACThenDecrypt()
+  // call resetHMAC(secret) -> update(ciphertext) -> finalizeHMAC(secret, ...),
+  // so as long as both sides use the same secret and see the same ciphertext
+  // bytes, this reproduces the same MAC -- which is all Utils::MACThenDecrypt()
+  // needs to validate correctly under test.
+  void resetHMAC(const uint8_t* key, size_t keyLen) {
+    _len = 0;
+    memset(_state, 0, sizeof(_state));
+    update(key, keyLen);
+  }
+
+  void finalizeHMAC(const uint8_t* key, size_t keyLen, uint8_t* hash, size_t hashLen) {
+    update(key, keyLen);
+    finalize(hash, hashLen);
+  }
 };

@@ -45,6 +45,9 @@ public:
     size_t print(char c) { return write(c); }
     size_t print(const char* str) { return write(str); }
 
+    size_t println() { return write('\n'); }
+    size_t println(const char* str) { return print(str) + println(); }
+
     //size_t println(void)  { return 0; }
     
     virtual void flush() { /* Empty implementation for backward compatibility */ }    
