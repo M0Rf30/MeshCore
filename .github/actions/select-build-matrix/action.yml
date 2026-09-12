@@ -1,0 +1,104 @@
+name: Select Build Matrix
+description: >
+  Chooses which PlatformIO envs to build for this run. In "full" mode every
+  buildable env is selected (nightly/scheduled/manual runs, for coverage). In
+  "diff" mode only envs affected by the changed files are selected: any
+  variant directory that changed builds all of its own envs (read from that
+  variant's own platformio.ini, since env names are not a strict 1:1 mapping
+  of directory names), and a change under src/, examples/, lib/, boards/,
+  platformio.ini or build.sh triggers a small cross-platform representative
+  subset (one env per esp32/nrf52/rp2040/stm32 platform family).
+inputs:
+  mode:
+    description: "'full' builds every env; 'diff' selects envs from changed files"
+    required: true
+  base-sha:
+    description: "git sha to diff HEAD against; only used when mode is 'diff'. Empty means no usable base (fall back to the representative subset)."
+    required: false
+    default: ""
+outputs:
+  matrix:
+    description: "JSON array of pio env names to build"
+    value: ${{ steps.select.outputs.matrix }}
+  summary:
+    description: "human readable explanation of the selection"
+    value: ${{ steps.select.outputs.summary }}
+runs:
+  using: "composite"
+  steps:
+    - id: select
+      shell: bash
+      run: |
+        set -e
+
+        # Known-good env per platform family. Covers a src/, examples/, lib/,
+        # boards/ or platformio.ini change without building all ~590 envs.
+        REPRESENTATIVE_ENVS=(
+          Heltec_v3_companion_radio_ble
+          RAK_4631_companion_radio_ble
+          PicoW_repeater
+          wio-e5-mini_repeater
+        )
+
+        declare -A SEEN
+        ENVS=()
+        add_env() {
+          if [ -z "${SEEN[$1]:-}" ]; then
+            SEEN[$1]=1
+            ENVS+=("$1")
+          fi
+        }
+
+        if [[ "${{ inputs.mode }}" == "full" ]]; then
+          while IFS= read -r env; do
+            [ -n "$env" ] && add_env "$env"
+          done < <(bash build.sh get-all-firmwares-to-build)
+          SUMMARY="full matrix: ${#ENVS[@]} envs (every buildable pio env)"
+        else
+          BASE_SHA="${{ inputs.base-sha }}"
+          CHANGED_FILES=""
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA" 2>/dev/null; then
+            CHANGED_FILES=$(git diff --name-only "$BASE_SHA" HEAD)
+          fi
+
+          CHANGED_VARIANT_DIRS=$(printf '%s\n' "$CHANGED_FILES" | grep -oE '^variants/[^/]+' | sort -u | sed 's#variants/##' || true)
+          for dir in $CHANGED_VARIANT_DIRS; do
+            while IFS= read -r env; do
+              [ -n "$env" ] && add_env "$env"
+            done < <(grep -oP '^\[env:\K[^]]+' "variants/$dir/platformio.ini" 2>/dev/null)
+          done
+
+          if printf '%s\n' "$CHANGED_FILES" | grep -qE '^(src/|examples/|lib/|boards/|platformio\.ini$|build\.sh$)'; then
+            for env in "${REPRESENTATIVE_ENVS[@]}"; do
+              add_env "$env"
+            done
+          fi
+
+          # nothing matched (diff unavailable, or only unrelated files changed
+          # in a run that still reached this action) -> always build the
+          # representative subset so the check never silently builds nothing
+          if [ "${#ENVS[@]}" -eq 0 ]; then
+            for env in "${REPRESENTATIVE_ENVS[@]}"; do
+              add_env "$env"
+            done
+          fi
+
+          VARIANT_COUNT=$(printf '%s\n' "$CHANGED_VARIANT_DIRS" | grep -c . || true)
+          SUMMARY="path-based selection: ${#ENVS[@]} envs (from ${VARIANT_COUNT} changed variant dir(s) plus the representative subset)"
+        fi
+
+        JSON=$(printf '%s\n' "${ENVS[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+        {
+          echo "matrix=$JSON"
+          echo "summary=$SUMMARY"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### Build matrix selection"
+          echo
+          echo "$SUMMARY"
+          echo
+          echo '```'
+          printf '%s\n' "${ENVS[@]}"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"

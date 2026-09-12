@@ -7,52 +7,297 @@ on:
       - 'src/**'
       - 'examples/**'
       - 'variants/**'
+      - 'lib/**'
+      - 'boards/**'
       - 'platformio.ini'
+      - 'build.sh'
       - '.github/workflows/pr-build-check.yml'
+      - '.github/actions/select-build-matrix/**'
+      - '.github/actions/build-and-measure/**'
+      - '.github/actions/setup-build-environment/**'
   push:
     branches: [main, dev]
     paths:
       - 'src/**'
       - 'examples/**'
       - 'variants/**'
+      - 'lib/**'
+      - 'boards/**'
       - 'platformio.ini'
+      - 'build.sh'
       - '.github/workflows/pr-build-check.yml'
+      - '.github/actions/select-build-matrix/**'
+      - '.github/actions/build-and-measure/**'
+      - '.github/actions/setup-build-environment/**'
+  schedule:
+    # nightly full-matrix build of every env, for coverage the PR-time
+    # path-based subset intentionally skips
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: 'Build every env instead of the path-based subset'
+        type: boolean
+        default: false
+      fail_on_regression_bytes:
+        description: 'Fail the run if any env grows flash by more than this many bytes (0 = report only)'
+        type: string
+        default: '0'
+
+permissions:
+  contents: read
+
+env:
+  SIZE_REGRESSION_THRESHOLD_BYTES: ${{ github.event.inputs.fail_on_regression_bytes || '0' }}
 
 jobs:
+  select-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      mode: ${{ steps.mode.outputs.value }}
+      base-sha: ${{ steps.diff-base.outputs.sha }}
+    steps:
+      - name: Clone Repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine run mode
+        id: mode
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" || "${{ github.event.inputs.full_matrix }}" == "true" ]]; then
+            echo "value=full" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=diff" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine diff base
+        id: diff-base
+        if: steps.mode.outputs.value == 'diff'
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA=$(git merge-base "${{ github.event.pull_request.base.sha }}" HEAD)
+          elif [[ -n "${{ github.event.before }}" && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+            BASE_SHA="${{ github.event.before }}"
+          else
+            BASE_SHA=""
+          fi
+          echo "sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Select build matrix
+        id: select
+        uses: ./.github/actions/select-build-matrix
+        with:
+          mode: ${{ steps.mode.outputs.value }}
+          base-sha: ${{ steps.diff-base.outputs.sha }}
+
   build:
+    needs: select-matrix
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        environment:
-          # ESP32-S3 (most common platform)
-          - Heltec_v3_companion_radio_ble
-          - Heltec_v3_repeater
-          - Heltec_v3_room_server
-          # nRF52
-          - RAK_4631_companion_radio_ble
-          - RAK_4631_companion_radio_ethernet
-          - RAK_4631_repeater
-          - RAK_4631_repeater_ethernet
-          - RAK_4631_room_server
-          - RAK_4631_room_server_ethernet
-          # RP2040
-          - PicoW_repeater
-          # STM32
-          - wio-e5-mini_repeater
-          # ESP32-C6
-          - LilyGo_Tlora_C6_repeater_
-          # LR1110 (nRF52)
-          - wio_wm1110_repeater
-          # SX1276 (ESP32)
-          - Tbeam_SX1276_repeater
-
+        environment: ${{ fromJson(needs.select-matrix.outputs.matrix) }}
     steps:
       - name: Clone Repo
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Build Environment
         uses: ./.github/actions/setup-build-environment
 
-      - name: Build ${{ matrix.environment }}
-        run: pio run -e ${{ matrix.environment }}
+      - name: Build & measure (PR head)
+        id: head
+        uses: ./.github/actions/build-and-measure
+        with:
+          environment: ${{ matrix.environment }}
+
+      - name: Fail if this env does not build
+        if: steps.head.outputs.build-outcome != 'success'
+        run: |
+          echo "::error::${{ matrix.environment }} failed to build"
+          exit 1
+
+      - name: Checkout base commit for size comparison
+        if: needs.select-matrix.outputs.mode == 'diff' && needs.select-matrix.outputs.base-sha != ''
+        run: git checkout ${{ needs.select-matrix.outputs.base-sha }} -- . ':!.github'
+
+      - name: Build & measure (base commit)
+        id: base
+        if: needs.select-matrix.outputs.mode == 'diff' && needs.select-matrix.outputs.base-sha != ''
+        uses: ./.github/actions/build-and-measure
+        with:
+          environment: ${{ matrix.environment }}
+
+      - name: Write size delta report
+        if: always() && steps.head.outputs.build-outcome == 'success'
+        env:
+          ENV_NAME: ${{ matrix.environment }}
+          HEAD_FLASH: ${{ steps.head.outputs.flash-bytes }}
+          HEAD_RAM: ${{ steps.head.outputs.ram-bytes }}
+          BASE_FLASH: ${{ steps.base.outputs.flash-bytes }}
+          BASE_RAM: ${{ steps.base.outputs.ram-bytes }}
+        run: |
+          mkdir -p size-report
+          python3 -c "
+          import json, os
+
+          def as_int(name):
+              value = os.environ.get(name)
+              return int(value) if value else None
+
+          data = {
+              'env': os.environ['ENV_NAME'],
+              'head_flash': as_int('HEAD_FLASH'),
+              'head_ram': as_int('HEAD_RAM'),
+              'base_flash': as_int('BASE_FLASH'),
+              'base_ram': as_int('BASE_RAM'),
+          }
+          with open(f\"size-report/{data['env']}.json\", 'w') as f:
+              json.dump(data, f)
+          "
+
+          {
+            echo "### ${{ matrix.environment }}"
+            echo
+            echo "- head: flash=${HEAD_FLASH:-unknown} bytes, ram=${HEAD_RAM:-unknown} bytes"
+            if [ -n "${BASE_FLASH:-}" ]; then
+              echo "- base: flash=$BASE_FLASH bytes, ram=$BASE_RAM bytes"
+            else
+              echo "- base: not available (new env, or no base comparison for this run)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload size report
+        if: always() && steps.head.outputs.build-outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: size-report-${{ matrix.environment }}
+          path: size-report/*.json
+          retention-days: 7
+
+  size-report:
+    needs: [select-matrix, build]
+    if: always() && needs.select-matrix.outputs.mode == 'diff'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Clone Repo
+        uses: actions/checkout@v6
+
+      - name: Download size reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: size-report-*
+          path: size-reports
+          merge-multiple: true
+
+      - name: Build report table
+        id: report
+        run: |
+          python3 -c "
+          import glob, json, os
+
+          rows = []
+          for path in sorted(glob.glob('size-reports/*.json')):
+              with open(path) as f:
+                  d = json.load(f)
+              hf, hr = d.get('head_flash'), d.get('head_ram')
+              bf, br = d.get('base_flash'), d.get('base_ram')
+              if hf is None or hr is None or bf is None or br is None:
+                  continue
+              flash_delta = hf - bf
+              ram_delta = hr - br
+              if flash_delta == 0 and ram_delta == 0:
+                  continue
+              rows.append((d['env'], hf, flash_delta, (flash_delta / bf * 100) if bf else 0.0,
+                            hr, ram_delta, (ram_delta / br * 100) if br else 0.0))
+
+          rows.sort(key=lambda r: -abs(r[2]))
+
+          marker = '<!-- meshcore-ci-size-report -->'
+          lines = [marker, '', '## Firmware size report', '']
+          if not rows:
+              lines.append('No flash/RAM size changes in the envs built for this run.')
+          else:
+              lines.append('| env | flash (bytes) | delta flash | delta flash % | RAM (bytes) | delta RAM | delta RAM % |')
+              lines.append('|---|---:|---:|---:|---:|---:|---:|')
+              for env, hf, fd, fp, hr, rd, rp in rows:
+                  lines.append(f'| {env} | {hf} | {fd:+d} | {fp:+.2f}% | {hr} | {rd:+d} | {rp:+.2f}% |')
+
+          threshold = int(os.environ.get('THRESHOLD', '0'))
+          exceeds = threshold > 0 and any(abs(r[2]) > threshold for r in rows)
+
+          with open('report.md', 'w') as f:
+              f.write('\n'.join(lines) + '\n')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f\"exceeds-threshold={'true' if exceeds else 'false'}\n\")
+              f.write(f'row-count={len(rows)}\n')
+          "
+        env:
+          THRESHOLD: ${{ env.SIZE_REGRESSION_THRESHOLD_BYTES }}
+
+      - name: Write job summary
+        run: cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload merged size report
+        uses: actions/upload-artifact@v7
+        with:
+          name: size-report
+          path: report.md
+          retention-days: 30
+
+      # Forked-PR runs get a read-only GITHUB_TOKEN and cannot post comments;
+      # for those the job summary + artifact above are the whole report. This
+      # intentionally avoids pull_request_target (which would run untrusted
+      # PR code with write-token privileges) just to comment on forks.
+      - name: Find existing size-report comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        id: find-comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "<!-- meshcore-ci-size-report -->";
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+            return existing ? String(existing.id) : "";
+          result-encoding: string
+
+      - name: Post or update size-report comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const body = fs.readFileSync("report.md", "utf8");
+            const commentId = "${{ steps.find-comment.outputs.result }}";
+            if (commentId) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: Number(commentId),
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Enforce size regression threshold
+        if: steps.report.outputs.exceeds-threshold == 'true'
+        run: |
+          echo "::error::flash size regression exceeds ${SIZE_REGRESSION_THRESHOLD_BYTES} byte threshold"
+          exit 1

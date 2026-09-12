@@ -1,0 +1,39 @@
+name: Build Firmware And Measure Size
+description: >
+  Runs `pio run -e <environment>` against the current checkout and parses the
+  RAM/Flash usage line PlatformIO prints at the end of a build. Does not fail
+  the step if the build fails; check the `build-outcome` output instead so
+  callers can decide what a failed build means for them (e.g. a size
+  comparison against a base commit that doesn't have this env yet).
+inputs:
+  environment:
+    description: "pio env name to build"
+    required: true
+outputs:
+  build-outcome:
+    description: "'success' or 'failure'"
+    value: ${{ steps.build.outcome }}
+  flash-bytes:
+    description: "used flash bytes, empty if the build failed or size could not be parsed"
+    value: ${{ steps.parse.outputs.flash-bytes }}
+  ram-bytes:
+    description: "used RAM bytes, empty if the build failed or size could not be parsed"
+    value: ${{ steps.parse.outputs.ram-bytes }}
+runs:
+  using: "composite"
+  steps:
+    - id: build
+      shell: bash
+      continue-on-error: true
+      run: pio run -e "${{ inputs.environment }}" 2>&1 | tee "/tmp/pio-build-${{ inputs.environment }}.log"
+
+    - id: parse
+      shell: bash
+      run: |
+        LOG="/tmp/pio-build-${{ inputs.environment }}.log"
+        FLASH=$(grep -oP 'Flash:\s+\[.*?\]\s+[\d.]+%\s+\(used\s+\K\d+' "$LOG" || true)
+        RAM=$(grep -oP 'RAM:\s+\[.*?\]\s+[\d.]+%\s+\(used\s+\K\d+' "$LOG" || true)
+        {
+          echo "flash-bytes=$FLASH"
+          echo "ram-bytes=$RAM"
+        } >> "$GITHUB_OUTPUT"

@@ -17,6 +17,7 @@ Commands:
   build-companion-firmwares: Build all companion firmwares for all build targets.
   build-repeater-firmwares: Build all repeater firmwares for all build targets.
   build-room-server-firmwares: Build all chat room server firmwares for all build targets.
+  get-all-firmwares-to-build: List every buildable firmware env, excluding the native unit-test envs. Used by CI to build a full/nightly matrix.
 
 Examples:
 Build firmware for the "RAK_4631_repeater" device target
@@ -301,4 +302,6 @@ elif [[ $1 == "get-repeater-firmwares-to-build" ]]; then
   get_pio_envs_ending_with_string "_repeater"
 elif [[ $1 == "get-room-server-firmwares-to-build" ]]; then
   get_pio_envs_ending_with_string "_room_server"
+elif [[ $1 == "get-all-firmwares-to-build" ]]; then
+  get_pio_envs | grep -v -E '^native(_kiss_modem)?$'
 fi
