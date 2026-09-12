@@ -1,9 +1,11 @@
 #pragma once
 #include "ConfigSerializer.h"
 #include "KeyValueStore.h"
+#include <Mesh.h>
 
 class CommonRadioPrefs : public ConfigSerializer, public KeyValueStore {
   bool _is_dirty = false;
+  mesh::Mesh* _mesh_ref = NULL;   // set by the app, so "get txdelay" can report live adaptive state
 protected:
   CommonRadioPrefs() { }
 public:
@@ -61,6 +63,13 @@ public:
 
   virtual uint8_t getFEMTxGain() const = 0;
   virtual void setFEMTxGain(uint8_t g) = 0;
+
+  virtual float getBackoffMultiplier() const = 0;
+  virtual void setBackoffMultiplier(float m) = 0;
+
+  /// wires this pref set to the running Mesh instance, so adaptive contention state can be reported
+  void setMeshRef(mesh::Mesh* m) { _mesh_ref = m; }
+  mesh::Mesh* getMeshRef() const { return _mesh_ref; }
 
   bool handleCommand(const char* command, uint32_t sender_timestamp, char* reply);
 

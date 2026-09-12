@@ -57,6 +57,12 @@ mesh::Packet* PacketQueue::removeByIdx(int i) {
   return item;
 }
 
+bool PacketQueue::delayByIdx(int i, uint32_t extra_millis) {
+  if (i < 0 || i >= _num) return false;  // invalid index
+  _schedule_table[i] += extra_millis;
+  return true;
+}
+
 bool PacketQueue::add(mesh::Packet* packet, uint8_t priority, uint32_t scheduled_for) {
   if (_num == _size) {
     return false;
@@ -112,6 +118,9 @@ mesh::Packet* StaticPoolPacketManager::getOutboundByIdx(int i) {
 }
 mesh::Packet* StaticPoolPacketManager::removeOutboundByIdx(int i) {
   return send_queue.removeByIdx(i);
+}
+bool StaticPoolPacketManager::delayOutboundByIdx(int i, uint32_t extra_millis) {
+  return send_queue.delayByIdx(i, extra_millis);
 }
 
 void StaticPoolPacketManager::queueInbound(mesh::Packet* packet, uint32_t scheduled_for) {

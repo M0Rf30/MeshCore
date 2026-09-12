@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Dispatcher.h>
+#include <helpers/ContentionTracker.h>
 
 namespace mesh {
 
@@ -28,16 +29,24 @@ class Mesh : public Dispatcher {
   RTCClock* _rtc;
   RNG* _rng;
   MeshTables* _tables;
+  ContentionTracker _contention;
 
   void removeSelfFromPath(Packet* packet);
   void routeDirectRecvAcks(Packet* packet, uint32_t delay_millis);
   //void routeRecvAcks(Packet* packet, uint32_t delay_millis);
   DispatcherAction forwardMultipartDirect(Packet* pkt);
 
+  // wraps _tables->wasSeen(), additionally feeding flood-packet echoes to the contention tracker
+  bool checkSeen(Packet* pkt);
+
+  // reactive backoff: hash is still queued (not yet transmitted) and a neighbour echoed it first
+  void applyReactiveBackoff(const uint8_t hash[MAX_HASH_SIZE], const Packet* packet);
+
 protected:
   DispatcherAction onRecvPacket(Packet* pkt) override;
 
   virtual uint32_t getCADFailRetryDelay() const override;
+  void logTx(Packet* packet, int len) override;
 
   /**
    * \brief  Decide what to do with received packet, ie. discard, forward, or hold
@@ -70,6 +79,12 @@ protected:
    * \returns  number of extra (Direct) ACK transmissions wanted.
    */
   virtual uint8_t getExtraAckTransmitCount() const;
+
+  /**
+   * \returns  scale (0.0-2.0) applied to airtime for reactive per-packet backoff, when a neighbour
+   *           is heard retransmitting a flood packet this node still has queued. 0 disables it.
+   */
+  virtual float getBackoffMultiplier() const { return 0.2f; }
 
   /**
    * \brief  Perform search of local DB of peers/contacts.
@@ -181,6 +196,12 @@ public:
 
   RNG* getRNG() const { return _rng; }
   RTCClock* getRTCClock() const { return _rtc; }
+
+  /// current local-contention estimate: EMA of dupes heard per retransmitted flood packet
+  float getContentionEma() const { return _contention.getEma(); }
+
+  /// current adaptive flood delay factor (0.0 quiet .. ~0.5 at an EMA of ~15 dupes, unbounded above)
+  float getFloodDelayFactor() const { return _contention.getFloodDelayFactorPermille() / 1000.0f; }
 
   Packet* createAdvert(const LocalIdentity& id, const uint8_t* app_data=NULL, size_t app_data_len=0);
   Packet* createDatagram(uint8_t type, const Identity& dest, const uint8_t* secret, const uint8_t* data, size_t len);

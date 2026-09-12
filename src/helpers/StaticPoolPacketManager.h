@@ -15,6 +15,7 @@ public:
   int count() const { return _num; }
   int countBefore(uint32_t now) const;
   mesh::Packet* itemAt(int i) const { return _table[i]; }
+  bool delayByIdx(int i, uint32_t extra_millis);
   mesh::Packet* removeByIdx(int i);
 };
 
@@ -33,6 +34,7 @@ public:
   int getFreeCount() const override;
   mesh::Packet* getOutboundByIdx(int i) override;
   mesh::Packet* removeOutboundByIdx(int i) override;
+  bool delayOutboundByIdx(int i, uint32_t extra_millis) override;
   void queueInbound(mesh::Packet* packet, uint32_t scheduled_for) override;
   mesh::Packet* getNextInbound(uint32_t now) override;
 };

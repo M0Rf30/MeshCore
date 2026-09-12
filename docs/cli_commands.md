@@ -515,21 +515,35 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 ---
 
-#### View or change the retransmit delay factor for flood traffic
+#### View the adaptive flood retransmit state / change the legacy delay factor
 **Usage:**
 - `get txdelay`
 - `set txdelay <value>`
 
 **Parameters:**
-- `value`: Transmit delay factor (0-2)
+- `value`: Legacy transmit delay factor (0-2)
 
 **Default:** `0.5`
 
-**Note:** When multiple nearby repeaters all hear the same flood packet, each waits a random amount of time before retransmitting to avoid simultaneous collisions. This factor scales the size of that random window. Higher values reduce collision risk at the cost of added latency. `0` disables the window entirely.
+**Note:** Flood retransmit timing is now self-tuning -- see [Adaptive Contention](adaptive_contention.md). `get txdelay` reports the live local-contention estimate (`contention`, an EMA of duplicate echoes heard per retransmitted packet) and the resulting `factor` (the adaptive delay multiplier derived from it), instead of a fixed number. `set txdelay` still parses, validates and persists its value for pref-file/binary compatibility with older tools, but the stored value is no longer read by the retransmit path.
 
 ---
 
-#### View or change the retransmit delay factor for direct traffic
+#### View or change the reactive per-packet backoff scale
+**Usage:**
+- `get backoff.multiplier`
+- `set backoff.multiplier <value>`
+
+**Parameters:**
+- `value`: Backoff multiplier (0.0-2.0)
+
+**Default:** `0.2`
+
+**Note:** See [Adaptive Contention](adaptive_contention.md). While this node still has a flood packet queued to retransmit, hearing a neighbour retransmit that same packet first pushes this node's own send back by a random amount up to `value * airtime` (cumulative extension capped at min(2000ms, 12x airtime) per packet). `0` disables this reactive push-back; the contention estimate reported by `get txdelay` keeps updating regardless.
+
+---
+
+#### View or change the retransmit delay factor for direct traffic (legacy, inert)
 **Usage:**
 - `get direct.txdelay`
 - `set direct.txdelay <value>`
@@ -539,7 +553,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 **Default:** `0.2`
 
-**Note:** Same collision-avoidance random window as `txdelay`, but applied to direct (non-flood, routed) traffic. The default is lower because direct packets are addressed to a specific next hop, so far fewer nodes compete to retransmit them.
+**Note:** Direct (single next-hop) retransmits now use a small fixed jitter window rather than a configurable one -- adaptive delay buys nothing when only one node ever retransmits a given packet. This command still parses and persists its value for pref-file/binary compatibility, but the stored value is no longer read by the retransmit path.
 
 ---
 

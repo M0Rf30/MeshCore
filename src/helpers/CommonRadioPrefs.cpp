@@ -197,7 +197,11 @@ bool CommonRadioPrefs::handleCommand(const char* command, uint32_t sender_timest
   }
 
   if (strcmp(command, "get txdelay") == 0) {
-    sprintf(reply, "> %s", StrHelper::ftoa(getFloodTxDelay()));
+    if (_mesh_ref) {
+      sprintf(reply, "> contention=%s, factor=%s", StrHelper::ftoa(_mesh_ref->getContentionEma()), StrHelper::ftoa(_mesh_ref->getFloodDelayFactor()));
+    } else {
+      sprintf(reply, "> %s", StrHelper::ftoa(getFloodTxDelay()));   // no live Mesh wired in -- legacy value only
+    }
     return true;
   }
   if (memcmp(command, "set txdelay ", 12) == 0) {
@@ -219,6 +223,21 @@ bool CommonRadioPrefs::handleCommand(const char* command, uint32_t sender_timest
     float f = atof(&command[19]);
     if (f >= 0 && f <= 2.0f) {
       setDirectTxDelay(f);
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Error, must be 0-2");
+    }
+    return true;
+  }
+
+  if (strcmp(command, "get backoff.multiplier") == 0) {
+    sprintf(reply, "> %s", StrHelper::ftoa(getBackoffMultiplier()));
+    return true;
+  }
+  if (memcmp(command, "set backoff.multiplier ", 23) == 0) {
+    float f = atof(&command[23]);
+    if (f >= 0 && f <= 2.0f) {
+      setBackoffMultiplier(f);
       strcpy(reply, "OK");
     } else {
       strcpy(reply, "Error, must be 0-2");

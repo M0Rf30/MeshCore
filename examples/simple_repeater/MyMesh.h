@@ -141,8 +141,9 @@ protected:
   void logTxFail(mesh::Packet* pkt, int len) override;
   int calcRxDelay(float score, uint32_t air_time) const override;
 
-  uint32_t getRetransmitDelay(const mesh::Packet* packet) override;
-  uint32_t getDirectRetransmitDelay(const mesh::Packet* packet) override;
+  float getBackoffMultiplier() const override {
+    return _prefs.getRadioPrefs()->getBackoffMultiplier();
+  }
 
   int getInterferenceThreshold() const override {
     return _prefs.interference_threshold;

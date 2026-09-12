@@ -14,13 +14,17 @@ void Mesh::loop() {
 bool Mesh::allowPacketForward(const mesh::Packet* packet) { 
   return false;  // by default, Transport NOT enabled
 }
-uint32_t Mesh::getRetransmitDelay(const mesh::Packet* packet) { 
-  uint32_t t = (_radio->getEstAirtimeFor(packet->getRawLength()) * 52 / 50) / 2;
-
-  return _rng->nextInt(0, 5)*t;
+uint32_t Mesh::getRetransmitDelay(const mesh::Packet* packet) {
+  uint32_t airtime = _radio->getEstAirtimeFor(packet->getRawLength());
+  uint32_t spread = _contention.getFloodSpreadMs(airtime);   // ~0 quiet .. capped at min(2000ms, 6*airtime)
+  return _rng->nextInt(0, spread + 1);
 }
 uint32_t Mesh::getDirectRetransmitDelay(const Packet* packet) {
-  return 0;  // by default, no delay
+  // only one hop ever retransmits a DIRECT packet, so contention-adaptive delay buys nothing here:
+  // keep a small, fixed (non-adaptive) spread, just enough to desync simultaneous single-hop replies.
+  uint32_t airtime = _radio->getEstAirtimeFor(packet->getRawLength());
+  uint32_t t = (airtime * 52 / 50) / 2;
+  return _rng->nextInt(0, t + 1);
 }
 uint8_t Mesh::getExtraAckTransmitCount() const {
   return 0;
@@ -120,7 +124,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
       memcpy(&ack_crc, &pkt->payload[i], 4); i += 4;
       if (i > pkt->payload_len) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete ACK packet", getLogDateTime());
-      } else if (!_tables->wasSeen(pkt)) {
+      } else if (!checkSeen(pkt)) {
         _tables->markSeen(pkt);
         onAckRecv(pkt, ack_crc);
         action = routeRecvPacket(pkt);
@@ -138,7 +142,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
       uint8_t* macAndData = &pkt->payload[i];   // MAC + encrypted data 
       if (i + CIPHER_MAC_SIZE >= pkt->payload_len) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete data packet", getLogDateTime());
-      } else if (!_tables->wasSeen(pkt)) {
+      } else if (!checkSeen(pkt)) {
         _tables->markSeen(pkt);
         // NOTE: this is a 'first packet wins' impl. When receiving from multiple paths, the first to arrive wins.
         //       For flood mode, the path may not be the 'best' in terms of hops.
@@ -202,7 +206,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
       uint8_t* macAndData = &pkt->payload[i];   // MAC + encrypted data 
       if (i + 2 >= pkt->payload_len) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete data packet", getLogDateTime());
-      } else if (!_tables->wasSeen(pkt)) {
+      } else if (!checkSeen(pkt)) {
         _tables->markSeen(pkt);
         if (self_id.isHashMatch(&dest_hash)) {
           Identity sender(sender_pub_key);
@@ -230,7 +234,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
       uint8_t* macAndData = &pkt->payload[i];   // MAC + encrypted data 
       if (i + 2 >= pkt->payload_len) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete data packet", getLogDateTime());
-      } else if (!_tables->wasSeen(pkt)) {
+      } else if (!checkSeen(pkt)) {
         _tables->markSeen(pkt);
         // scan channels DB, for all matching hashes of 'channel_hash' (max 4 matches supported ATM)
         GroupChannel channels[4];
@@ -262,7 +266,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete advertisement packet", getLogDateTime());
       } else if (self_id.matches(id.pub_key)) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): receiving SELF advert packet", getLogDateTime());
-      } else if (!_tables->wasSeen(pkt)) {
+      } else if (!checkSeen(pkt)) {
         _tables->markSeen(pkt);
         uint8_t* app_data = &pkt->payload[i];
         int app_data_len = pkt->payload_len - i;
@@ -309,7 +313,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
           tmp.payload_len = pkt->payload_len - 1;
           memcpy(tmp.payload, &pkt->payload[1], tmp.payload_len);
 
-          if (!_tables->wasSeen(&tmp)) {
+          if (!checkSeen(&tmp)) {
             _tables->markSeen(&tmp);
             uint32_t ack_crc;
             memcpy(&ack_crc, tmp.payload, 4);
@@ -349,11 +353,69 @@ DispatcherAction Mesh::routeRecvPacket(Packet* packet) {
     self_id.copyHashTo(&packet->path[n * packet->getPathHashSize()], packet->getPathHashSize());
     packet->setPathHashCount(n + 1);
 
+    uint8_t hash[MAX_HASH_SIZE];
+    packet->calculatePacketHash(hash);
+    _contention.notePendingRetransmit(hash, _ms->getMillis());
+
     uint32_t d = getRetransmitDelay(packet);
     // as this propagates outwards, give it lower and lower priority
     return ACTION_RETRANSMIT_DELAYED(packet->getPathHashCount(), d);   // give priority to closer sources, than ones further away
   }
   return ACTION_RELEASE;
+}
+
+// wraps _tables->wasSeen(), additionally feeding flood-packet echoes to the contention tracker:
+//  - if we've already transmitted our own copy, the echo counts toward the contention EMA.
+//  - if our own copy is still queued (not yet sent), push our pending TX back (reactive backoff).
+bool Mesh::checkSeen(Packet* pkt) {
+  bool seen = _tables->wasSeen(pkt);
+  if (seen && pkt->isRouteFlood()) {
+    uint8_t hash[MAX_HASH_SIZE];
+    pkt->calculatePacketHash(hash);
+    if (_contention.noteDupeHeard(hash, _ms->getMillis())) {
+      applyReactiveBackoff(hash, pkt);
+    }
+  }
+  return seen;
+}
+
+void Mesh::applyReactiveBackoff(const uint8_t hash[MAX_HASH_SIZE], const Packet* packet) {
+  float multiplier = getBackoffMultiplier();
+  if (multiplier <= 0.0f) return;   // disabled (EMA tracking above still applies)
+
+  uint32_t airtime = _radio->getEstAirtimeFor(packet->getRawLength());
+  uint32_t cap = ContentionTracker::reactiveBackoffCap(airtime);
+
+  uint32_t room = _contention.remainingBackoffBudget(hash, cap);
+  if (room == 0) return;
+
+  uint32_t raw = _rng->nextInt(0, (uint32_t)(multiplier * airtime) + 1);
+  uint32_t applied = raw > room ? room : raw;
+  if (applied == 0) return;
+
+  // find our own still-queued copy of this exact packet, and push its scheduled send further out
+  int total = _mgr->getOutboundTotal();
+  for (int i = 0; i < total; i++) {
+    Packet* p = _mgr->getOutboundByIdx(i);
+    if (p && p->isRouteFlood()) {
+      uint8_t h[MAX_HASH_SIZE];
+      p->calculatePacketHash(h);
+      if (memcmp(h, hash, MAX_HASH_SIZE) == 0) {
+        if (_mgr->delayOutboundByIdx(i, applied)) {
+          _contention.recordBackoffApplied(hash, applied);
+        }
+        break;
+      }
+    }
+  }
+}
+
+void Mesh::logTx(Packet* packet, int len) {
+  if (packet->isRouteFlood()) {
+    uint8_t hash[MAX_HASH_SIZE];
+    packet->calculatePacketHash(hash);
+    _contention.markTransmitted(hash, _ms->getMillis());
+  }
 }
 
 DispatcherAction Mesh::forwardMultipartDirect(Packet* pkt) {
@@ -658,6 +720,11 @@ void Mesh::sendFlood(Packet* packet, uint32_t delay_millis, uint8_t path_hash_si
   } else {
     pri = 1;
   }
+  // small fixed anti-collision spread for locally-originated floods (no dupe history to adapt from)
+  uint32_t local_cap = _radio->getEstAirtimeFor(packet->getRawLength()) * 3;
+  if (local_cap > 1000) local_cap = 1000;
+  delay_millis += _rng->nextInt(0, local_cap + 1);
+
   sendPacket(packet, pri, delay_millis);
 }
 
@@ -687,6 +754,11 @@ void Mesh::sendFlood(Packet* packet, uint16_t* transport_codes, uint32_t delay_m
   } else {
     pri = 1;
   }
+  // small fixed anti-collision spread for locally-originated floods (no dupe history to adapt from)
+  uint32_t local_cap = _radio->getEstAirtimeFor(packet->getRawLength()) * 3;
+  if (local_cap > 1000) local_cap = 1000;
+  delay_millis += _rng->nextInt(0, local_cap + 1);
+
   sendPacket(packet, pri, delay_millis);
 }
 

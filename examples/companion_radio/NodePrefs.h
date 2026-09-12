@@ -48,6 +48,7 @@ public:
   char default_scope_name[31];
   uint8_t default_scope_key[16];
   int8_t tz_offset = 0;
+  float backoff_multiplier = 0.2f;  // reactive per-packet backoff scale (0 disables it); see ContentionTracker
 #ifdef ENABLE_WIFI_INTERFACE
   #ifndef WIFI_SSID
     #define WIFI_SSID ""
@@ -81,6 +82,7 @@ private:
       def("agc_int", _parent->agc_reset_interval);
       def("hash_mode", _parent->path_hash_mode);
       def("multi_ack", _parent->multi_acks);
+      def("backoff_mult", _parent->backoff_multiplier);
     }
   public:
     RadioPrefs(NodePrefs* parent) : _parent(parent) { }
@@ -120,6 +122,8 @@ private:
     void setFEMRxGain(uint8_t g) override { _parent->radio_fem_rxgain = g; markDirty(); }
     uint8_t getFEMTxGain() const override { return _parent->radio_fem_txgain; }
     void setFEMTxGain(uint8_t g) override { _parent->radio_fem_txgain = g; markDirty(); }
+    float getBackoffMultiplier() const override { return _parent->backoff_multiplier; }
+    void setBackoffMultiplier(float m) override { _parent->backoff_multiplier = m; markDirty(); }
   };
   RadioPrefs radio;
 
@@ -220,6 +224,7 @@ public:
   void setRepeatEn(bool en) { repeat.disable_fwd = en ? 0 : 1; }
 
   CommonRadioPrefs* getRadioPrefs() { return &radio; }
+  const CommonRadioPrefs* getRadioPrefs() const { return &radio; }
   KeyValueStore* getCustom() { return &custom; }
 
   bool isDirty() const override { return ConfigSerializer::isDirty() || radio.isDirty() || custom.isDirty(); }

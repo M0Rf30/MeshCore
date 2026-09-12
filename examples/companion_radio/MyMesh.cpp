@@ -279,15 +279,6 @@ int MyMesh::calcRxDelay(float score, uint32_t air_time) const {
   return (int)((pow(_prefs.rx_delay_base, 0.85f - score) - 1.0) * air_time);
 }
 
-uint32_t MyMesh::getRetransmitDelay(const mesh::Packet *packet) {
-  uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.tx_delay_factor);
-  return getRNG()->nextInt(0, 5*t + 1);
-}
-uint32_t MyMesh::getDirectRetransmitDelay(const mesh::Packet *packet) {
-  uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.direct_tx_delay_factor);
-  return getRNG()->nextInt(0, 5*t + 1);
-}
-
 uint8_t MyMesh::getExtraAckTransmitCount() const {
   return _prefs.multi_acks;
 }
@@ -973,6 +964,7 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
 
 void MyMesh::begin(bool has_display) {
   BaseChatMesh::begin();
+  _prefs.getRadioPrefs()->setMeshRef(this);
 
   if (!_store->loadMainIdentity(self_id)) {
     self_id = radio_new_identity(); // create new random identity

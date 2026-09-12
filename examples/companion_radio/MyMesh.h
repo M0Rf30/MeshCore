@@ -125,8 +125,9 @@ protected:
     return ((int)_prefs.agc_reset_interval) * 4000;   // milliseconds
   }
   int calcRxDelay(float score, uint32_t air_time) const override;
-  uint32_t getRetransmitDelay(const mesh::Packet *packet) override;
-  uint32_t getDirectRetransmitDelay(const mesh::Packet *packet) override;
+  float getBackoffMultiplier() const override {
+    return _prefs.getRadioPrefs()->getBackoffMultiplier();
+  }
   uint8_t getExtraAckTransmitCount() const override;
   bool filterRecvFloodPacket(mesh::Packet* packet) override;
   bool allowPacketForward(const mesh::Packet* packet) override;

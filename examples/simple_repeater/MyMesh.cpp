@@ -503,6 +503,7 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
 }
 
 void MyMesh::logTx(mesh::Packet *pkt, int len) {
+  mesh::Mesh::logTx(pkt, len);
 #ifdef WITH_BRIDGE
   if (_prefs.bridge_pkt_src == 0) {
     bridge.sendPacket(pkt);
@@ -542,15 +543,6 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
 int MyMesh::calcRxDelay(float score, uint32_t air_time) const {
   if (_prefs.rx_delay_base <= 0.0f) return 0;
   return (int)((pow(_prefs.rx_delay_base, 0.85f - score) - 1.0) * air_time);
-}
-
-uint32_t MyMesh::getRetransmitDelay(const mesh::Packet *packet) {
-  uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.tx_delay_factor);
-  return getRNG()->nextInt(0, 5*t + 1);
-}
-uint32_t MyMesh::getDirectRetransmitDelay(const mesh::Packet *packet) {
-  uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.direct_tx_delay_factor);
-  return getRNG()->nextInt(0, 5*t + 1);
 }
 
 mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
@@ -943,6 +935,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 
 void MyMesh::begin(FILESYSTEM *fs) {
   mesh::Mesh::begin();
+  _prefs.getRadioPrefs()->setMeshRef(this);
   _fs = fs;
   // load persisted prefs
   _cli.loadPrefs(_fs);

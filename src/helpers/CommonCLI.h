@@ -71,6 +71,7 @@ public:
   uint8_t path_hash_mode = 0;   // which path mode to use when sending
   uint8_t loop_detect = 0;
   uint8_t cad_enabled = 0;      // hardware Channel Activity Detection before TX (boolean)
+  float backoff_multiplier = 0.2f;  // reactive per-packet backoff scale (0 disables it); see ContentionTracker
   uint8_t extra_sf[4];
 
 private:
@@ -95,6 +96,7 @@ private:
       def("agc_int", _parent->agc_reset_interval);
       def("hash_mode", _parent->path_hash_mode);
       def("multi_ack", _parent->multi_acks);
+      def("backoff_mult", _parent->backoff_multiplier);
     }
   public:
     RadioPrefs(NodePrefs* parent) : _parent(parent) { }
@@ -133,6 +135,8 @@ private:
     void setFEMRxGain(uint8_t g) override { _parent->radio_fem_rxgain = g; markDirty(); }
     uint8_t getFEMTxGain() const override { return _parent->radio_fem_txgain; }
     void setFEMTxGain(uint8_t g) override { _parent->radio_fem_txgain = g; markDirty(); }
+    float getBackoffMultiplier() const override { return _parent->backoff_multiplier; }
+    void setBackoffMultiplier(float m) override { _parent->backoff_multiplier = m; markDirty(); }
   };
   RadioPrefs radio;
 
@@ -234,6 +238,7 @@ public:
   }
 
   CommonRadioPrefs* getRadioPrefs() { return &radio; }
+  const CommonRadioPrefs* getRadioPrefs() const { return &radio; }
   KeyValueStore* getCustom() { return &custom; }
 
   bool isDirty() const override { return ConfigSerializer::isDirty() || radio.isDirty() || custom.isDirty(); }

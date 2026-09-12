@@ -245,6 +245,7 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
   }
 }
 void MyMesh::logTx(mesh::Packet *pkt, int len) {
+  mesh::Mesh::logTx(pkt, len);
   if (_logging) {
     File f = openAppend(PACKET_LOG_FILE);
     if (f) {
@@ -286,15 +287,6 @@ const char *MyMesh::getLogDateTime() {
   sprintf(tmp, "%02d:%02d:%02d - %d/%d/%d U", dt.hour(), dt.minute(), dt.second(), dt.day(), dt.month(),
           dt.year());
   return tmp;
-}
-
-uint32_t MyMesh::getRetransmitDelay(const mesh::Packet *packet) {
-  uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.tx_delay_factor);
-  return getRNG()->nextInt(0, 5*t + 1);
-}
-uint32_t MyMesh::getDirectRetransmitDelay(const mesh::Packet *packet) {
-  uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.direct_tx_delay_factor);
-  return getRNG()->nextInt(0, 5*t + 1);
 }
 
 bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
@@ -695,6 +687,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 
 void MyMesh::begin(FILESYSTEM *fs) {
   mesh::Mesh::begin();
+  _prefs.getRadioPrefs()->setMeshRef(this);
   _fs = fs;
   // load persisted prefs
   _cli.loadPrefs(_fs);

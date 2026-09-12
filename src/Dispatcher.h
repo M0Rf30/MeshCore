@@ -96,6 +96,12 @@ public:
   virtual int getFreeCount() const = 0;
   virtual Packet* getOutboundByIdx(int i) = 0;
   virtual Packet* removeOutboundByIdx(int i) = 0;
+
+  /**
+   * \brief  push a still-queued outbound packet's scheduled send time further out.
+   * \returns  true if applied. Default (non-pure) so existing implementers are unaffected.
+   */
+  virtual bool delayOutboundByIdx(int i, uint32_t extra_millis) { return false; }
   virtual void queueInbound(Packet* packet, uint32_t scheduled_for) = 0;
   virtual Packet* getNextInbound(uint32_t now) = 0;
 };

@@ -312,14 +312,6 @@ int SensorMesh::calcRxDelay(float score, uint32_t air_time) const {
   return (int) ((pow(_prefs.rx_delay_base, 0.85f - score) - 1.0) * air_time);
 }
 
-uint32_t SensorMesh::getRetransmitDelay(const mesh::Packet* packet) {
-  uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.tx_delay_factor);
-  return getRNG()->nextInt(0, 6)*t;
-}
-uint32_t SensorMesh::getDirectRetransmitDelay(const mesh::Packet* packet) {
-  uint32_t t = (_radio->getEstAirtimeFor(packet->getPathByteLen() + packet->payload_len + 2) * _prefs.direct_tx_delay_factor);
-  return getRNG()->nextInt(0, 6)*t;
-}
 int SensorMesh::getInterferenceThreshold() const {
   return _prefs.interference_threshold;
 }
@@ -742,6 +734,7 @@ SensorMesh::SensorMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::Millise
 
 void SensorMesh::begin(FILESYSTEM* fs) {
   mesh::Mesh::begin();
+  _prefs.getRadioPrefs()->setMeshRef(this);
   _fs = fs;
   // load persisted prefs
   _cli.loadPrefs(_fs);
