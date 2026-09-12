@@ -725,6 +725,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+  radio_driver.setRxDutyCycleEnabled(_prefs.radio_duty_cycle_enabled);
 
   board.attachDynamicPrefs(_prefs.getCustom());
 

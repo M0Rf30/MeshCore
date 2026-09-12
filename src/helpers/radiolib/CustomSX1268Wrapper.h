@@ -8,9 +8,9 @@
 #define USE_SX1268
 #endif
 
-class CustomSX1268Wrapper : public RadioLibWrapper {
+class CustomSX1268Wrapper : public SX126xDutyCycleWrapper {
 public:
-  CustomSX1268Wrapper(CustomSX1268& radio, mesh::MainBoard& board) : RadioLibWrapper(radio, board) { }
+  CustomSX1268Wrapper(CustomSX1268& radio, mesh::MainBoard& board) : SX126xDutyCycleWrapper(radio, board) { }
 
   void setParams(float freq, float bw, uint8_t sf, uint8_t cr) override {
     ((CustomSX1268 *)_radio)->setFrequency(freq);
@@ -18,6 +18,7 @@ public:
     ((CustomSX1268 *)_radio)->setBandwidth(bw);
     ((CustomSX1268 *)_radio)->setCodingRate(cr);
     updatePreamble(sf);
+    updateDutyCycleWindow(sf, bw, preambleLengthForSF(sf));
     PacketMillis pm = calcMaxPacketMillis(sf, bw, cr, preambleLengthForSF(sf));
     ((CustomSX1268 *)_radio)->setPreambleMillis(pm.preambleMillis);
     ((CustomSX1268 *)_radio)->setMaxPayloadMillis(pm.payloadMillis);

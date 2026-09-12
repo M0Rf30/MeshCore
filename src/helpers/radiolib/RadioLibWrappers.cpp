@@ -109,15 +109,26 @@ void RadioLibWrapper::loop() {
   }
 }
 
+bool RadioLibWrapper::doStartReceive() {
+  if (isRxDutyCycleEnabled()) {
+    if (startReceiveDutyCycleRaw(_duty_window.rxPeriodUs, _duty_window.sleepPeriodUs)) return true;
+    MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceiveDutyCycle failed, falling back to continuous RX");
+    // fall through to continuous receive below
+  }
+  int err = _radio->startReceive();
+  if (err != RADIOLIB_ERR_NONE) {
+    MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
+    return false;
+  }
+  return true;
+}
+
 void RadioLibWrapper::startRecv() {
   #if defined(USE_LR2021)
   _radio->standby(); // without this LR2021 can throw -706 when calling startReceive after hardware CAD when side detectors are enabled
   #endif
-  int err = _radio->startReceive();
-  if (err == RADIOLIB_ERR_NONE) {
+  if (doStartReceive()) {
     state = STATE_RX;
-  } else {
-    MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
   }
 }
 
@@ -149,11 +160,8 @@ int RadioLibWrapper::recvRaw(uint8_t* bytes, int sz) {
   }
 
   if (state != STATE_RX) {
-    int err = _radio->startReceive();
-    if (err == RADIOLIB_ERR_NONE) {
+    if (doStartReceive()) {
       state = STATE_RX;
-    } else {
-      MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
     }
   }
   return len;

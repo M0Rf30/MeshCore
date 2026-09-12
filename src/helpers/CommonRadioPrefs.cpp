@@ -119,6 +119,26 @@ bool CommonRadioPrefs::handleCommand(const char* command, uint32_t sender_timest
     return true;
   }
 
+  if (strcmp(command, "get rxduty") == 0) {
+    if (!radio_driver.supportsRxDutyCycle()) {
+      strcpy(reply, "> unsupported");
+    } else {
+      sprintf(reply, "> %s", isRxDutyCycleEnabled() ? "on" : "off");
+    }
+    return true;
+  }
+  if (memcmp(command, "set rxduty ", 11) == 0) {
+    bool enabled = memcmp(&command[11], "on", 2) == 0;
+    setRxDutyCycleEnabled(enabled);
+    radio_driver.setRxDutyCycleEnabled(enabled);
+    if (enabled && !radio_driver.supportsRxDutyCycle()) {
+      strcpy(reply, "OK - unsupported on this radio, continuous RX will be used");
+    } else {
+      strcpy(reply, "OK");
+    }
+    return true;
+  }
+
   if (strcmp(command, "get radio.rxgain") == 0) {
     sprintf(reply, "> %s", getRxGain() != 0 ? "on" : "off");
     return true;

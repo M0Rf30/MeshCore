@@ -4,9 +4,9 @@
 #include "RadioLibWrappers.h"
 #include "SX126xReset.h"
 
-class CustomLLCC68Wrapper : public RadioLibWrapper {
+class CustomLLCC68Wrapper : public SX126xDutyCycleWrapper {
 public:
-  CustomLLCC68Wrapper(CustomLLCC68& radio, mesh::MainBoard& board) : RadioLibWrapper(radio, board) { }
+  CustomLLCC68Wrapper(CustomLLCC68& radio, mesh::MainBoard& board) : SX126xDutyCycleWrapper(radio, board) { }
 
   void setParams(float freq, float bw, uint8_t sf, uint8_t cr) override {
     ((CustomLLCC68 *)_radio)->setFrequency(freq);
@@ -14,6 +14,7 @@ public:
     ((CustomLLCC68 *)_radio)->setBandwidth(bw);
     ((CustomLLCC68 *)_radio)->setCodingRate(cr);
     updatePreamble(sf);
+    updateDutyCycleWindow(sf, bw, preambleLengthForSF(sf));
     PacketMillis pm = calcMaxPacketMillis(sf, bw, cr, preambleLengthForSF(sf));
     ((CustomLLCC68 *)_radio)->setPreambleMillis(pm.preambleMillis);
     ((CustomLLCC68 *)_radio)->setMaxPayloadMillis(pm.payloadMillis);

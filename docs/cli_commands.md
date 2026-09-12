@@ -277,6 +277,23 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 ---
 
+#### View or change chip-autonomous RX duty cycling ("sniff mode") (SX1262, SX1268, LLCC68, STM32WLx only)
+**Usage:**
+- `get rxduty`
+- `set rxduty <state>`
+
+**Parameters:**
+- `state`: `on`|`off`
+
+**Default:** `off`
+
+**Notes:**
+- Lets the radio chip sleep between short preamble-detect windows instead of listening continuously, reducing RX current draw. See [docs/rx_duty_cycle.md](rx_duty_cycle.md) for how the window is computed and its limitations.
+- `get rxduty` replies `unsupported` on radios without a duty-cycle receive mode (e.g. SX1276, LR1110, LR2021). `set rxduty on` on such a radio is accepted but has no effect; the radio keeps using continuous RX.
+- With MeshCore's current preamble-length table, duty cycling only has a safe sleep window at SF5-SF8; at SF9-SF12 the configured preamble is too short to sleep at all, and continuous RX is used regardless of this setting.
+
+---
+
 #### View or change the LoRa FEM receive-path gain state on supported boards
 **Usage:**
 - `get radio.fem.rxgain`

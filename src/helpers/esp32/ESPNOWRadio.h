@@ -41,6 +41,10 @@ public:
   virtual bool setRxBoostedGainMode(bool) { }
   virtual bool getRxBoostedGainMode() const { return false; }
 
+  // ESP-NOW is not a LoRa radio -- chip-autonomous RX duty cycling is not applicable.
+  bool supportsRxDutyCycle() const { return false; }
+  bool setRxDutyCycleEnabled(bool) { return false; }
+
   uint32_t intID();
   void setTxPower(uint8_t dbm);
 };

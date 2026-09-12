@@ -29,6 +29,9 @@ public:
   virtual bool isCadEnabled() const = 0;
   virtual void setCadEnabled(bool en) = 0;
 
+  virtual bool isRxDutyCycleEnabled() const = 0;
+  virtual void setRxDutyCycleEnabled(bool en) = 0;
+
   virtual uint8_t getIntThresh() const = 0;
   virtual void setIntThresh(uint8_t t) = 0;
 

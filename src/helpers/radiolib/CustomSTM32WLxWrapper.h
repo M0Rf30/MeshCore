@@ -5,9 +5,9 @@
 #include "SX126xReset.h"
 #include <math.h>
 
-class CustomSTM32WLxWrapper : public RadioLibWrapper {
+class CustomSTM32WLxWrapper : public SX126xDutyCycleWrapper {
 public:
-  CustomSTM32WLxWrapper(CustomSTM32WLx& radio, mesh::MainBoard& board) : RadioLibWrapper(radio, board) { }
+  CustomSTM32WLxWrapper(CustomSTM32WLx& radio, mesh::MainBoard& board) : SX126xDutyCycleWrapper(radio, board) { }
 
   void setParams(float freq, float bw, uint8_t sf, uint8_t cr) override {
     ((CustomSTM32WLx *)_radio)->setFrequency(freq);
@@ -15,6 +15,7 @@ public:
     ((CustomSTM32WLx *)_radio)->setBandwidth(bw);
     ((CustomSTM32WLx *)_radio)->setCodingRate(cr);
     updatePreamble(sf);
+    updateDutyCycleWindow(sf, bw, preambleLengthForSF(sf));
     PacketMillis pm = calcMaxPacketMillis(sf, bw, cr, preambleLengthForSF(sf));
     ((CustomSTM32WLx *)_radio)->setPreambleMillis(pm.preambleMillis);
     ((CustomSTM32WLx *)_radio)->setMaxPayloadMillis(pm.payloadMillis);
